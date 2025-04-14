@@ -1,49 +1,110 @@
 use crate::api::{artikel, merkzettel};
+use crate::export;
 use crate::infrastructure::client::Client;
-use std::error::Error;
+use crate::infrastructure::request_cache::RequestCache;
+use crate::infrastructure::templates::Templates;
+use anyhow::{Context, Result};
+use std::fs::write;
 use uritemplate::UriTemplate;
 
-pub fn run(client: &Client) -> Result<(), Box<dyn Error>> {
-    let merkzettel = client
-        .request(merkzettel::METHOD, merkzettel::URL)
-        .send()?
-        .json::<merkzettel::Response>()?;
+static ARTIKEL_BATCH_SIZE: usize = 50;
 
-    let merkzettel = merkzettel.artikelnummern.chunks(10);
-    let merkzettel = merkzettel
-        .map(|chunk| {
-            let artikel = client
-                .request(
-                    artikel::METHOD,
-                    UriTemplate::new(artikel::URI_TEMPLATE)
-                        .set("artikelnummern", chunk.join(","))
-                        .build(),
+#[derive(Debug, clap::Args)]
+pub struct Args {
+    #[arg(
+        long = "output",
+        short = 'o',
+        required = true,
+        value_name = "file",
+        help = "File the Merkzettel should be written to (file is created/overwritten)."
+    )]
+    output: String,
+
+    #[arg(
+        long = "cached",
+        short = 'c',
+        default_value = "false",
+        help = "Caches Thalia responses, useful for development since otherwise tokens may be invalidated for sussy behaviour."
+    )]
+    cached: bool,
+
+    #[arg(
+        long = "no-google-fonts",
+        default_value = "false",
+        help = "Removes the Google Fonts import."
+    )]
+    no_google_fonts: bool
+}
+
+impl Args {
+    pub fn run(self, client: &Client, templates: &Templates, cache: &RequestCache) -> Result<()> {
+        let merkzettel = cache.get_cached::<merkzettel::Response>(
+            self.cached,
+            merkzettel::METHOD.as_str(),
+            merkzettel::URL,
+            || {
+                client
+                    .request(merkzettel::METHOD, merkzettel::URL)
+                    .send()?
+                    .json::<merkzettel::Response>()
+                    .with_context(|| {
+                        format!(
+                            "Could not parse response for {} {}",
+                            merkzettel::METHOD,
+                            merkzettel::URL
+                        )
+                    })
+            },
+        )?;
+
+        let merkzettel = merkzettel.artikelnummern.chunks(ARTIKEL_BATCH_SIZE);
+        let merkzettel = merkzettel
+            .map(|chunk| {
+                let url = UriTemplate::new(artikel::URI_TEMPLATE)
+                    .set("artikelnummern", chunk.join(","))
+                    .build();
+                cache.get_cached::<artikel::Response>(
+                    self.cached,
+                    artikel::METHOD.as_str(),
+                    &url,
+                    || {
+                        client
+                            .request(artikel::METHOD, &url)
+                            .send()?
+                            .json::<artikel::Response>()
+                            .with_context(|| {
+                                format!("Could not parse response for {} {}", artikel::METHOD, url)
+                            })
+                    },
                 )
-                .send()?
-                .json::<artikel::Response>()?;
-            Ok::<artikel::Response, Box<dyn Error>>(artikel)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-    let merkzettel = merkzettel.iter().flatten().collect::<Vec<_>>();
-    merkzettel.iter().for_each(|artikel| {
-        println!(
-            "{} - {} - {}",
-            artikel
-                .autor()
-                .map(|it| it.name.as_str())
-                .unwrap_or("Unknown Author"),
-            artikel.titel,
-            artikel
-                .bevorzugter_preis()
-                .map(|preis| format!(
-                    "{:.2} {}",
-                    (preis.betrag as f32 / 100f32),
-                    preis.waehrung.text
-                ))
-                .unwrap_or("No Price".to_string())
-        )
-    });
+        let merkzettel = export::merkzettel::Merkzettel {
+            no_google_fonts: self.no_google_fonts,
+            items: merkzettel
+                .into_iter()
+                .flatten()
+                .map(|it| export::merkzettel::Item {
+                    titel: it.titel.clone(),
+                    autor: it.autor().map(|it| it.name.clone()),
+                    beschreibung: it.beschreibung(),
+                    preis: it
+                        .bevorzugter_preis()
+                        .map(|it| format!("{:.2} {}", it.betrag as f32 / 100f32, it.waehrung.text)),
+                    cover: it.cover().map(|it| it.url()),
+                    meldeschluessel: it.meldeschluessel.text.clone(),
+                    link: it.link(),
+                    isbn: it.isbn()
+                })
+                .collect(),
+        }
+            .render(templates)
+            .with_context(|| "Could not render Merkzettel.")?;
 
-    Ok(())
+        write(&self.output, merkzettel)
+            .with_context(|| format!("Could not write into output file \"{}\".", &self.output))?;
+
+        Ok(())
+    }
 }

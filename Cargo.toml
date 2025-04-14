@@ -1,12 +1,18 @@
 [package]
-name = "thalia"
+name = "ttk"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/yuri-becker/ttk"
 
 [dependencies]
+anyhow = "1.0.97"
+blake2 = "0.10.6"
+cached = { version = "0.55.1", features = ["disk_store"] }
 clap = { version = "4.5.35", features = ["derive"] }
 dotenv = "0.15.0"
+handlebars = "6.3.2"
 reqwest = { version = "0.12.15", features = ["json", "blocking"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 uritemplate = "0.1.2"
+log = "0.4.27"

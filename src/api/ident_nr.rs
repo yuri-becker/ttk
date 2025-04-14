@@ -1,0 +1,1 @@
+pub type IdentNr = Option<i32>;

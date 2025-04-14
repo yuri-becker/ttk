@@ -1,9 +1,8 @@
+use crate::api::ident_nr::IdentNr;
 use reqwest::Method;
-use serde::de::{Error, Visitor};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::fmt;
-use std::fmt::Formatter;
+use uritemplate::UriTemplate;
 
 pub const URI_TEMPLATE: &str = "https://www.thalia.de/api/2003/artikel/v4/{artikelnummern}";
 
@@ -57,7 +56,7 @@ pub struct ResponseItem {
     pub bestand: Bestand,
     pub auflage: Option<String>,
     pub kopierschutz: Option<Kopierschutz>,
-    pub produzent: Produzent,
+    pub produzent: Option<Produzent>,
     #[serde(rename = "jugendschutzEinteilung")]
     pub jugendschutz_einteilung: Option<IndexedValue>,
     pub serie: Serie,
@@ -108,6 +107,31 @@ impl ResponseItem {
             .collect::<Vec<_>>();
         verkaufspreise.first().copied()
     }
+
+    pub fn cover(&self) -> Option<&Bild> {
+        self.media
+            .bilder
+            .iter()
+            .find(|it| it.typ.eq(&BildTyp::Coverbild))
+    }
+
+    pub fn link(&self) -> String {
+        format!(
+            "https://www.thalia.de/shop/home/artikeldetails/{}",
+            &self.id.matnr
+        )
+    }
+
+    pub fn isbn(&self) -> Option<String> {
+        self.id.isbn13.clone()
+    }
+
+    pub fn beschreibung(&self) -> Option<String> {
+        self.zusatztexte
+            .iter()
+            .find(|it| it.typ.ident_nr.eq(&Some(2)))
+            .map(|it| it.text.clone())
+    }
 }
 
 /// Each KategoriePfad represents one possible path leading to the article.
@@ -138,28 +162,36 @@ pub struct Kategorie {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Media {
-    bilder: Vec<Bild>,
+    pub bilder: Vec<Bild>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Bild {
     #[serde(rename = "migrationUrlTemplateFixedScaling")]
     /// Example: "https://assets.thalia.media/img/artikel/dfc0766a01a7ed6d04b4341607e8a84b1a8bc305-00-{resolutionKey}.jpeg",
-    migration_url_template_fixed_scaling: Option<String>,
-    breite: Option<u32>,
+    pub migration_url_template_fixed_scaling: Option<String>,
+    pub breite: Option<u32>,
     #[serde(rename = "migrationUrlTemplateCustomScaling")]
-    migration_url_template_custom_scaling: Option<String>,
-    hoehe: u32,
+    pub migration_url_template_custom_scaling: Option<String>,
+    pub hoehe: u32,
     #[serde(rename = "urlTemplateCustomScaling")]
     /// Example: "https://images.thalia.media/-/{customScaling}/c3576ffc4e1448ccb3afccc568b4ebc9/the-three-body-problem-boxset-taschenbuch-cixin-liu-englisch.jpeg"
-    url_template_custom_scaling: String,
-    typ: BildTyp,
+    pub url_template_custom_scaling: String,
+    pub typ: BildTyp,
     #[serde(rename = "urlTemplateFixedScaling")]
     /// Example: "https://images.thalia.media/{resolutionKey}/-/c3576ffc4e1448ccb3afccc568b4ebc9/the-three-body-problem-boxset-taschenbuch-cixin-liu-englisch.jpeg"
-    url_template_fixed_scaling: String,
+    pub url_template_fixed_scaling: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+impl Bild {
+    pub fn url(&self) -> String {
+        UriTemplate::new(&self.url_template_fixed_scaling)
+            .set("resolutionKey", "00")
+            .build()
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub enum BildTyp {
     #[serde(rename = "coverbild")]
     Coverbild,
@@ -173,12 +205,12 @@ pub enum BildTyp {
 pub struct Meldeschluessel {
     #[serde(rename = "identNr")]
     ident_nr: IdentNr,
-    nur_stationaer: bool,
-    nachbestellbar: bool,
-    lieferzeit: u32,
-    text: String,
-    kaufbar: MeldeschluesselKaufbar,
-    lieferant: Lieferant,
+    nur_stationaer: Option<bool>,
+    nachbestellbar: Option<bool>,
+    lieferzeit: Option<u32>,
+    pub text: String,
+    kaufbar: Option<MeldeschluesselKaufbar>,
+    lieferant: Option<Lieferant>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -282,8 +314,8 @@ pub struct Salesrank {
     #[serde(rename = "rankCount")]
     rank_count: u32,
     #[serde(rename = "shopId")]
-    shop_id: OptionalIdentNr,
-    category: OptionalIdentNr,
+    shop_id: IdentNr,
+    category: IdentNr,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -545,68 +577,6 @@ pub struct Reihe {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct IndexedValue {
     #[serde(rename = "identNr")]
-    pub ident_nr: Option<IdentNr>,
+    pub ident_nr: IdentNr,
     pub text: String,
-}
-
-pub type IdentNr = u32;
-
-#[derive(Debug)]
-pub enum OptionalIdentNr {
-    None,
-    Some(IdentNr),
-}
-
-impl<'de> Deserialize<'de> for OptionalIdentNr {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct OptionalIdentNrVisitor;
-
-        impl Visitor<'_> for OptionalIdentNrVisitor {
-            type Value = OptionalIdentNr;
-
-            fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-                formatter.write_str("-1 or a positive integer")
-            }
-
-            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                if v > 0 {
-                    Ok(OptionalIdentNr::Some(v as u32))
-                } else {
-                    Err(E::custom("Value most not be 0"))
-                }
-            }
-
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where
-                E: Error,
-            {
-                if v < 0 {
-                    Ok(OptionalIdentNr::Some(v as u32))
-                } else if v == -1 {
-                    Ok(OptionalIdentNr::None)
-                } else {
-                    Err(E::custom("Value is not -1 or a positive integer"))
-                }
-            }
-        }
-        deserializer.deserialize_i64(OptionalIdentNrVisitor)
-    }
-}
-
-impl Serialize for OptionalIdentNr {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_i32(match self {
-            OptionalIdentNr::None => -1,
-            OptionalIdentNr::Some(ident_nr) => *ident_nr as i32,
-        })
-    }
 }

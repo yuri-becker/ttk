@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {{#unless no_google_fonts}}
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap"
+          rel="stylesheet">
+    <title>♥️ Merkzettel</title>
+    {{/unless}}
+</head>
+<body>
+<button class="export" onclick="window.print()">🖨️ Exportieren/Drucken</button>
+{{#each items}}
+    <article>
+        <h1>{{titel}}</h1>
+        <a class="artikel__cover" href="{{link}}" rel="noreferrer"><img src="{{cover}}" alt="" aria-hidden="true"></a>
+        <p class="artikel__autor">{{autor}}</p>
+        <p class="artikel__meldeschluessel">{{meldeschluessel}}</p>
+        <div class="artikel__beschreibung"> {{{beschreibung}}} </div>
+        <p class="artikel__preis"><strong>{{preis}}</strong></p>
+        <a class="artikel__link" href="{{link}}" rel="noreferrer">Auf thalia.de →</a>
+        <p class="artikel__isbn">{{isbn}}</p>
+    </article>
+{{/each}}
+</body>
+<style>
+    head {
+        min-height: 100%;
+    }
+
+    body {
+        width: 100%;
+        min-height: 100%;
+        font-family: "Inter", sans-serif;
+        font-optical-sizing: auto;
+        font-style: normal;
+
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2rem;
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+
+    button.export {
+        position: absolute;
+        left: 1rem;
+        top: 1rem;
+        z-index: 2;
+    }
+
+    @media print {
+        button.export {
+            display: none;
+        }
+    }
+
+    h1 {
+        font-size: 1.375rem;
+        font-weight: 700;
+    }
+
+    article {
+        display: grid;
+        grid-gap: 1rem;
+        grid-template-columns: 12rem 1fr auto;
+        grid-template-rows: auto auto 1fr auto;
+        width: 18cm;
+        page-break-inside: avoid;
+
+        @media print {
+            grid-template-columns: 5rem 1fr auto;
+        }
+
+        h1 {
+            anchor-name: --img;
+            grid-column: 2 / end;
+            grid-row: 1;
+            margin-top: 0;
+            margin-bottom: 0;
+        }
+
+        p {
+            margin-top: 0;
+            margin-bottom: 0;
+        }
+
+        a.artikel__cover {
+            grid-column: 1;
+            grid-row: 1 / end;
+
+            img {
+                max-width: 100%;
+            }
+        }
+
+
+        .artikel__autor {
+            grid-column: 2;
+            grid-row: 2;
+        }
+
+        .artikel__meldeschluessel {
+            grid-column: 3;
+            grid-row: 2;
+            text-align: end;
+        }
+
+        .artikel__beschreibung {
+            grid-column: 2 / end;
+            grid-row: 3;
+            text-overflow: ellipsis;
+        }
+
+        @media print {
+            .artikel__beschreibung {
+                display: none;
+            }
+        }
+
+        .artikel__preis {
+            grid-column: 2;
+            grid-row: 4;
+        }
+
+
+        .artikel__link, .artikel__isbn {
+            grid-column: 3;
+            grid-row: 4;
+            text-align: end;
+        }
+
+        .artikel__isbn {
+            display: none;
+        }
+
+        @media print {
+            a.artikel__link {
+                display: none;
+            }
+
+            .artikel__isbn {
+                display: block;
+            }
+        }
+    }
+</style>
+</html>
